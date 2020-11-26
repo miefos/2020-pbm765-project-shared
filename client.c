@@ -18,11 +18,6 @@ void set_leave_flag() {
     leave_flag = 1;
 }
 
-void remove_newline(char *str) {
-      if (strlen(str) > 0 && str[strlen(str)-1] == '\n')
-      	str[strlen(str)-1] = '\0';
-}
-
 void* send_loop(void* arg) {
 	int* client_socket = (int *) arg;
   char message[BUFFER_SIZE+5] = {}; // +5 to check if entered too large message
@@ -33,7 +28,6 @@ void* send_loop(void* arg) {
         printf("Message should be between 1 and %d chars. \n", BUFFER_SIZE);
         continue;
     }
-    setbuf(stdin, NULL); // clears overflow
     remove_newline(message);
 
     if (strcmp(message, "quit") == 0) {
@@ -71,89 +65,16 @@ void* receive_loop(void* arg) {
 
 int main(int argc, char **argv){
 
-  // validate parameters
-  if (argc != 3) {
-    printf("[Error] Please provide IP and port argument only (ex: -a=123.123.123.123 -p=9001).\n");
-    return -1;
-  }
-
-  int port = get_port("p", argc, argv);
-
-  if (port < 0) {
-    printf("[ERROR] Cannot get port number, errno %d\n", port);
-    return -1;
-  }
-
-  char* ip = NULL;
-  int result = get_named_argument("a", argc, argv, &ip);
-
-  if (result < 0 && ip != NULL) {
-    printf("[ERROR] Cannot get IP, errno %d\n", result);
-    return -1;
-  }
-
-  char username[260]; // actually max 255
-  char color[10]; // actually max 6
-  // char trash_collector[1024];
+  // server setup
+  int port; char ip[100]; if (client_setup(argc, argv, &port, ip) < 0) return -1;
 
 	// catch SIGINT (Interruption, e.g., ctrl+c)
 	signal(SIGINT, set_leave_flag);
 
-
-  // insert username
-  int username_ok = 1;
-	printf("Please enter your username: ");
-  fgets(username, 260, stdin);
-  remove_newline(username);
-  if (strlen(username) > 255 || strlen(username) < 2) {
-      printf("Username should be between 2 and 255 chars. \n");
-      username_ok = 0;
-  }
-
-  while (!username_ok) {
-    printf("Please try again: ");
-    fgets(username, 260, stdin);
-    remove_newline(username);
-    if (strlen(username) > 255 || strlen(username) < 2) {
-      printf("Username should be between 2 and 255 chars. \n");
-      username_ok = 0;
-    } else {
-      username_ok = 1;
-    }
-  }
-
-  // insert color
-  int color_ok = 1;
-	printf("Please enter your color (6 hex digits): ");
-  fgets(color, 10, stdin);
-  remove_newline(color);
-  if (strlen(color) != 6) {
-    printf("Color should be exactly 6 hex digits. \n");
-    color_ok = 0;
-  }
-
-  char c;
-  if ((c = contains_only_hex_digits(color)) != -1) {
-    printf("Color contains non-hex-digit character: %c\n", c);
-    color_ok = 0;
-  }
-
-  while (!color_ok) {
-    printf("Please try again: ");
-    fgets(color, 10, stdin);
-    remove_newline(color);
-    if (strlen(color) != 6) {
-      printf("Color should be exactly 6 hex digits. \n");
-      color_ok = 0;
-    } else if ((c = contains_only_hex_digits(color)) != -1) {
-      printf("Color contains non-hex-digit character: %c\n", c);
-      color_ok = 0;
-    } else {
-      color_ok = 1;
-    }
-  }
-
-
+  // get username, color
+  char username[256];
+  char color[7];
+  get_username_color(username, color);
 
   // create socket
   int client_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -162,12 +83,16 @@ int main(int argc, char **argv){
   struct sockaddr_in server_address;
   server_address.sin_family = AF_INET;
   server_address.sin_port = htons(port);
-  server_address.sin_addr.s_addr = inet_addr(ip); // ATTENTION !!! inet_addr();
+  server_address.sin_addr.s_addr = inet_addr(ip);
 
   int connection_status = connect(client_socket, (struct sockaddr *) &server_address, sizeof(server_address));
   // check for error with the connection
   if (connection_status < 0) {
     printf("[ERROR] There was an error with the connection.\n");
+    printf("============================================================\n");
+    printf("client socket = %d, server_address = %p, sizeof struct = %ld\n", client_socket, (struct sockaddr *) &server_address, sizeof(server_address));
+    printf("connection_status = %d, errno = %d\n", connection_status, errno);
+    printf("Port = %d, ip = %s\n", port, ip);
     return -1;
   }
 

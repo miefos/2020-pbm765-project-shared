@@ -8,6 +8,74 @@
 #define MC_MAX_SIZE_STRING 256
 #endif
 
+
+void remove_newline(char *str) {
+      if (strlen(str) > 0 && str[strlen(str)-1] == '\n')
+      	str[strlen(str)-1] = '\0';
+}
+
+int get_username_color(char* username, char* color) {
+  char username_temp[260]; // actually max 255
+  char color_temp[10]; // actually max 6
+  // insert username
+  int username_ok = 1;
+  printf("Please enter your username: ");
+  fgets(username_temp, 260, stdin);
+  remove_newline(username_temp);
+  if (strlen(username_temp) > 255 || strlen(username_temp) < 2) {
+      printf("Username should be between 2 and 255 chars. \n");
+      username_ok = 0;
+  }
+
+  while (!username_ok) {
+    printf("\nPlease try again: ");
+    fgets(username_temp, 260, stdin);
+    remove_newline(username_temp);
+    if (strlen(username_temp) > 255 || strlen(username_temp) < 2) {
+      printf("Username should be between 2 and 255 chars. \n");
+      username_ok = 0;
+    } else {
+      username_ok = 1;
+    }
+  }
+
+  // insert color
+  int color_ok = 1;
+  printf("Please enter your color (6 hex digits): ");
+  fgets(color_temp, 10, stdin);
+  remove_newline(color_temp);
+  if (strlen(color_temp) != 6) {
+    printf("Color should be exactly 6 hex digits. \n");
+    color_ok = 0;
+  }
+
+  char c;
+  if ((c = contains_only_hex_digits(color_temp)) != -1) {
+    printf("Color contains non-hex-digit character: %c\n", c);
+    color_ok = 0;
+  }
+
+  while (!color_ok) {
+    printf("\nPlease try again: ");
+    fgets(color_temp, 10, stdin);
+    remove_newline(color_temp);
+    if (strlen(color_temp) != 6) {
+      printf("Color should be exactly 6 hex digits. \n");
+      color_ok = 0;
+    } else if ((c = contains_only_hex_digits(color_temp)) != -1) {
+      printf("Color contains non-hex-digit character: %c\n", c);
+      color_ok = 0;
+    } else {
+      color_ok = 1;
+    }
+  }
+
+  strcpy(username, username_temp);
+  strcpy(color, color_temp);
+
+  return 0;
+}
+
 int contains_only_hex_digits(char* str) {
   for (int i = 0; str[i] != '\0'; i++) {
     char c = toupper(str[i]);
@@ -22,10 +90,34 @@ int contains_only_hex_digits(char* str) {
   return -1; // yes, contains only hex digits
 }
 
-// int err_mess_return(char *message) {
-//   printf("[ERROR] %s\n", message);
-//   return -1;
-// }
+int client_setup(int argc, char **argv, int *port, char *ip) {
+  // validate parameters
+  if (argc != 3) {
+    printf("[Error] Please provide IP and port argument only (ex: -a=123.123.123.123 -p=9001).\n");
+    return -1;
+  }
+
+  *port = get_port("p", argc, argv);
+
+  if (*port < 0) {
+    printf("[ERROR] Cannot get port number, errno %d\n", *port);
+    return -1;
+  }
+
+  char* iptemp = NULL;
+  int result = get_named_argument("a", argc, argv, &iptemp);
+  strcpy(ip, iptemp);
+
+  if (result < 0 || ip == NULL) {
+    printf("[ERROR] Cannot get IP, errno %d\n", result);
+    return -1;
+  }
+
+  printf("[OK] Client params successful. Port: %d, ip: %s\n", *port, ip);
+
+  return 0;
+}
+
 
 int server_setup(int argc, char **argv, int *port) {
     // validate parameters
@@ -74,25 +166,13 @@ int get_named_argument(char* key, int argc, char **argv, char** result) {
       continue; // not found
     }
 
-    //printf("HAPPY! %d, %s, j=%d\n", i, argv[i], j);
-
     if (argv[i][j] != '=') {
       continue; // not found
     }
 
-
-    //printf("HAPPY2! %d, %s, j=%d\n", i, argv[i], j);
-
     if ((strlen(argv[i]) < strlen(key)+3) || strlen(argv[i]) - strlen(key) - 2 < 1) {
       return -3; // not found
     }
-
-
-    //printf("HAPPY3! %d, %s, j=%d\n", i, argv[i], j);
-
-    //return 0;
-
-    //printf("HAPPY 2! %d, %s\n", i, argv[i]);
 
     // copy
     *result = (char*) malloc(sizeof(char)*(strlen(argv[i]) - strlen(key) - 1));
