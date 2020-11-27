@@ -206,7 +206,7 @@ Broadcast packet - OK
 pthread_mutex_t lock1 = PTHREAD_MUTEX_INITIALIZER;
 
 /* Add clients */
-client_struct* add_client(int clientclient_struct client = add_client(client_socket)_socket) {
+client_struct* add_client(int client_socket) {
   // malloc client
   client_struct* client = (client_struct *) malloc(sizeof(client_struct));
   if (client == NULL) {
