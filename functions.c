@@ -7,11 +7,13 @@
 #include <sys/socket.h>
 #include <ctype.h> // toupper, isprint
 #include <inttypes.h>
+#include <unistd.h>
 
 #ifndef MC_MAX_SIZE_STRING
 #define MC_MAX_SIZE_STRING 256
 #endif
 
+#define MAX_CLIENTS 10
 
 char printable_char(char c) {
   if (isprint(c)) return c;
@@ -256,7 +258,43 @@ int client_setup(int argc, char **argv, int *port, char *ip) {
 }
 
 
-int server_setup(int argc, char **argv, int *port) {
+int server_network_setup(int* main_socket, struct sockaddr_in* server_address, int port) {
+
+    *main_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (*main_socket < 0) {
+      printf("[ERROR] Cannot open main socket.\n");
+      close(*main_socket);
+      return -1;
+    }
+    printf("[OK] Main socket created.\n");
+
+    server_address->sin_family = AF_INET;
+    server_address->sin_addr.s_addr = INADDR_ANY;
+    server_address->sin_port = htons(port);
+
+    if (bind(*main_socket, (struct sockaddr*) server_address, sizeof(*server_address)) < 0) {
+      printf("[ERROR] Cannot bind the main server socket.\n");
+      printf("============================================================\n");
+      printf("main socket = %d, server_address = %p, sizeof struct = %ld\n", *main_socket, (struct sockaddr *) server_address, sizeof(*server_address));
+      printf("Port = %d, errno = %d\n", port, errno);
+      close(*main_socket);
+      return -1;
+    }
+    printf("[OK] Main socket binded.\n");
+
+    if (listen(*main_socket, MAX_CLIENTS) < 0) {
+      printf("[ERORR] Error listening to main socket.\n");
+      close(*main_socket);
+      return -1;
+    }
+    printf("[OK] Main socket is listening\n");
+
+    return 0;
+}
+
+
+
+int server_parse_args(int argc, char **argv, int *port) {
     // validate parameters
     if (argc != 2) {
       printf("[Error] Please provide port argument only (ex: -p=9001).\n");

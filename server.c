@@ -35,7 +35,7 @@ void* process_client(void* arg);
 void send_packet(char *packet); // send packet to all clients
 void broadcast_packet(char *packet, int id); // do not send to specified ID
 void remove_client(int id);
-void add_client(client_struct* client);
+client_struct* add_client(int client_socket);
 
 void set_leave_flag() {
     leave_flag = 1;
@@ -53,7 +53,7 @@ int main(int argc, char **argv){
 
   // server setup
   int port;
-  if (server_setup(argc, argv, &port) < 0) return -1;
+  if (server_parse_args(argc, argv, &port) < 0) return -1;
 
   // networking_thread
   pthread_t networking_thread;
@@ -130,40 +130,14 @@ void* start_network(void* arg) {
   int* port = (int *) arg;
   printf("[OK] Entered the start network with port %d.\n", *port);
 
-  int main_socket;
-  struct sockaddr_in server_address;
-  int client_socket;
-  struct sockaddr_in client_address;
+  // server_network_setup
+  int main_socket, client_socket;
+  struct sockaddr_in server_address, client_address;
   unsigned int client_address_size = sizeof(client_address);
+  if (server_network_setup(&main_socket, &server_address, *port) < 0) exit(-1);
 
-  main_socket = socket(AF_INET, SOCK_STREAM, 0);
-  if (main_socket < 0) {
-    printf("[ERROR] Cannot open main socket.\n");
-    close(main_socket);
-    exit(-1);
-  }
-  printf("[OK] Main socket created.\n");
-
-  server_address.sin_family = AF_INET;
-  server_address.sin_addr.s_addr = INADDR_ANY;
-  server_address.sin_port = htons(*port);
-
-  if (bind(main_socket, (struct sockaddr*) &server_address, sizeof(server_address)) < 0) {
-    printf("[ERROR] Cannot bind the main server socket.\n");
-    close(main_socket);
-    exit(-1);
-  }
-  printf("[OK] Main socket binded.\n");
-
-  if (listen(main_socket, MAX_CLIENTS) < 0) {
-    printf("[ERORR] Error listening to main socket.\n");
-    close(main_socket);
-    exit(-1);
-  }
-  printf("[OK] Main socket is listening\n");
-
+  // infinite loop...
   pthread_t new_client_threads;
-
   while (1) {
     /* waiting for clients */
     client_socket = accept(main_socket, (struct sockaddr*) &client_address, &client_address_size);
@@ -180,23 +154,17 @@ void* start_network(void* arg) {
   		continue;
   	}
 
-  	/* Client settings */
-  	client_struct* client = (client_struct *) malloc(sizeof(client_struct));
-    if (client == NULL) {
-      printf("[WARNING] Malloc did not work. Denying client.\n");
-      close(client_socket);
-      continue;
-    }
-
-  	client->socket = client_socket;
-  	client->ID = ID++;
-
   	/* Add client and make new thread */
-  	add_client(client);
+    client_struct* client = add_client(client_socket);
+  	if (client == NULL) {
+      close(client_socket); // if failed adding
+      continue;
+    };
+
   	pthread_create(&new_client_threads, NULL, &process_client, (void *) client);
   }
 
-  printf("[OK] Finished the start network.\n");
+  printf("[Hmm...] Finished the start network. Should it?\n");
 
   // return 0;
 
@@ -238,19 +206,29 @@ Broadcast packet - OK
 pthread_mutex_t lock1 = PTHREAD_MUTEX_INITIALIZER;
 
 /* Add clients */
-void add_client(client_struct* client) {
+client_struct* add_client(int clientclient_struct client = add_client(client_socket)_socket) {
+  // malloc client
+  client_struct* client = (client_struct *) malloc(sizeof(client_struct));
+  if (client == NULL) {
+    printf("[WARNING] Malloc did not work. Denying client.\n");
+    return NULL;
+  }
+
 	pthread_mutex_lock(&lock1);
 
 	for(int i=0; i < MAX_CLIENTS; ++i) {
 		if(!clients[i]) {
-			clients[i] = client;
-			break;
+      client->socket = client_socket;
+      client->ID = ID++;
+      client->has_introduced = 0;
 		}
 	}
 
 	client_count++;
 
 	pthread_mutex_unlock(&lock1);
+
+  return client;
 }
 
 /* Remove clients */
@@ -260,6 +238,7 @@ void remove_client(int id) {
 	for(int i=0; i < MAX_CLIENTS; ++i) {
 		if(clients[i]) {
 			if(clients[i]->ID == id) {
+        free(clients[i]);
 				clients[i] = NULL;
 				break;
 			}
