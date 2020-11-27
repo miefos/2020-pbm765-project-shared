@@ -16,12 +16,12 @@ void set_leave_flag() {
     leave_flag = 1;
 }
 
-void set_data_packet_0 (char* data, char* username, char* color, int name_len) {
+int set_data_packet_0 (unsigned char* data, char* username, char* color, int name_len) {
   // Data packet contents:
   // ============================
-  // [byte 0] = chars in username
-  // [byte 1 ... strlen(username) + 1] = username
-  // [byte strlen(username) + 1 ... strlen(username) + 1 + 6] = color
+  // packet[0] = chars in username
+  // packet[1 ... strlen(username) + 1] = username
+  // packet[strlen(username) + 1 ... strlen(username) + 1 + 6] = color
   // ============================
   // note for color bytes: there are 6 chars in color - 6 hex digits.
 
@@ -32,8 +32,8 @@ void set_data_packet_0 (char* data, char* username, char* color, int name_len) {
   data[0] = name_len & 0xFF; // cuts to 1 byte
   memcpy(data + 1, username, name_len); // no need to escape since its string
   memcpy(data + 1 + name_len, color, 6); // no need to escape since its string
-  // null terminator, will NOT be in packet but helpful in creating packet...
-  data[1 + name_len + 6] = '\0';
+
+  return 1 + name_len + 6;
 }
 
 void* send_loop(void* arg) {
@@ -79,7 +79,7 @@ void* receive_loop(void* arg) {
 
 int main(int argc, char **argv){
   unsigned char packet[MAX_PACKET_SIZE];
-  char data[MAX_PACKET_SIZE];
+  unsigned char data[MAX_PACKET_SIZE];
 
   // catch SIGINT (Interruption, e.g., ctrl+c)
 	signal(SIGINT, set_leave_flag);
@@ -93,21 +93,14 @@ int main(int argc, char **argv){
   get_username_color(username, color);
 
 	// Send 0th packet
-  set_data_packet_0(data, username, color, strlen(username));
-  int packet_size = create_packet(packet, 0, data);
+  unsigned char packet_type = 0; // 0 ... 7 only
+  unsigned int data_len = set_data_packet_0(data, username, color, strlen(username));
+  int packet_size = create_packet(packet, packet_type, data, data_len);
 
-  for (int i = 0; i < packet_size; i++) {
-    printf("Sending 0th packet's element %d: %c (%d)\n", i, printable_char(packet[i]), packet[i]);
-  	send(client_socket, (packet + i), 1, 0);
+  if (send_prepared_packet(packet, packet_type, packet_size, client_socket) < 0) {
+      printf("[ERROR] Cannot send intro packet in here...\n");
+      return -1;
   }
-
-  if (packet_size > 0) {
-    printf("0th packet sent.\n");
-  } else {
-    printf("[ERROR] 0th packet not sent\n");
-    return -1;
-  }
-
 
 	pthread_t send_thread;
   if(pthread_create(&send_thread, NULL, (void *) send_loop, &client_socket) != 0){
@@ -195,3 +188,4 @@ for shared memory could not use char str[200] = ""; needed to use strcpy... Beca
 problem related unsigned char
 
     **/
+

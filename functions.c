@@ -13,8 +13,25 @@
 #define MC_MAX_SIZE_STRING 256
 #endif
 
+int send_prepared_packet(unsigned char* packet, int packet_type, int packet_size, int client_socket) {
+  for (int i = 0; i < packet_size; i++) {
+    printf("Sending %dth packet's element %d: %c (%d)\n", packet_type, i, printable_char(packet[i]), packet[i]);
+  	send(client_socket, (packet + i), 1, 0);
+  }
 
-int escape_assign(int num, unsigned char* packet) {
+  if (packet_size > 0) {
+    printf("%dth packet sent.\n", packet_type);
+  } else {
+    printf("[ERROR] 0th packet not sent\n");
+    return -1;
+  }
+
+
+  return 0;
+}
+
+
+int escape_assign(unsigned char num, unsigned char* packet) {
   if (num == 0) {
     packet[0] = 1;
     packet[1] = 2;
@@ -39,7 +56,7 @@ char printable_char(char c) {
 
 void print_bytes(void* packet, int count) {
   int i = 0;
-  char *p = (char *) packet;
+  unsigned char *p = (unsigned char *) packet;
   if (count > 999) {
     printf("Cannot print more than 999 bytes! You asked for %d\n", count);
     return;
@@ -70,21 +87,21 @@ int assign_int_to_bytes_lendian_escape(unsigned char* packet_part, int n, int sh
 
     // byte 1
     byte = n & 0xFF;
-    escape_count += escape_assign((int) byte, &packet_part[0]);
+    escape_count += escape_assign(byte, &packet_part[0]);
 
     // byte 2
     byte = (n >> 8) & 0xFF;
-    escape_count += escape_assign((int) byte, &packet_part[1 + escape_count]);
+    escape_count += escape_assign(byte, &packet_part[1 + escape_count]);
 
 
     // byte 3
     byte = (n >> 16) & 0xFF;
-    escape_count += escape_assign((int) byte, &packet_part[2 + escape_count]);
+    escape_count += escape_assign(byte, &packet_part[2 + escape_count]);
 
 
     // byte 4
     byte = (n >> 16) & 0xFF;
-    escape_count += escape_assign((int) byte, &packet_part[3 + escape_count]);
+    escape_count += escape_assign(byte, &packet_part[3 + escape_count]);
   } else {
     packet_part[0] = n & 0xFF;
     packet_part[1] = (n >> 8) & 0xFF;
@@ -108,19 +125,23 @@ unsigned char get_checksum(unsigned char* packet_header, int length_header_excl_
     chk ^= packet_header[i];
   }
 
-  printf(" Checksum after head %d\n", chk);
-
   for (int i = 0; i < data_length; i++) {
     chk ^= packet_data[i];
   }
 
-  printf(" Checksum after he2ad %d\n", chk);
-
   return chk;
 }
 
-int create_packet(unsigned char* packet, int type, char* data) {
-  unsigned int DATA_LENGTH = strlen(data);
+int create_packet(unsigned char* packet, int type, unsigned char* data, unsigned int data_len) {
+  // ============== [ PACKET ] =================
+  // packet[0, 1] = 0 // divider
+  // packet[2] = packet_type // possible values 0...7
+  // packet[3,4,5,6] = data_length // unsigned int
+  // packet[7,8,9,10] = NPK // sequence of packet
+  // packet[11 ... data_length + 11] = data
+  // packet[data_length + 11 + 1] = XOR checksum for packet[2] ... packet[data_length + 11]
+  // ===========================================
+  unsigned int DATA_LENGTH = data_len;
   int escaped_total = 0;
 
   if (type > 7 || type < 0) {
@@ -489,3 +510,4 @@ int get_port(char* key, int argc, char** argv) {
 //
 //   return num_replaced;
 // }
+

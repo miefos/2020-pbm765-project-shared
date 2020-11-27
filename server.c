@@ -13,7 +13,7 @@
 
 typedef struct {
   int socket;
-  int ID;
+  unsigned char ID;
   int has_introduced; // meaning the 0th packet is received (at first 0, when receives set it to 1)
   char username[256];
   char color[7];
@@ -22,6 +22,7 @@ typedef struct {
 
 int client_count = 0;
 int ID = 0;
+const unsigned char game_ID = 211; // just some ID
 client_struct* clients[MAX_CLIENTS]; // creates array of clients with size MAX_CLIENTS
 volatile int leave_flag = 0;
 
@@ -62,32 +63,102 @@ int main(int argc, char **argv){
 	return 0;
 }
 
-int process_packet_0(unsigned char* packet, int size) {
+int send_packet_1(client_struct* client) {
+  unsigned char data[MAX_PACKET_SIZE];
+  unsigned char packet[MAX_PACKET_SIZE];
+  // ================ [PACKET DATA CONTENT] ==================
+  // packet[0] = game ID
+  // packet[1] = player ID
+  // packet[2,3,4,5] = player's initial size (unsigned int)
+  // packet[6,7,8,9] = maximum play field x (unsigned int)
+  // packet[10,11,12,13] = maximum play field y (unsigned int)
+  // packet[14,15,16,17] = time limit (unsigned int) in seconds
+  // packet[18,19,20,21] = number of lives (unsigned int)
+  // =========================================================
+  // Total packet size 22 (+ escapes)
+  unsigned char player_id = (unsigned char) client->ID;
+  int total_escape = 0;
+  const unsigned int p_initial_size = 10, max_x = 1000, max_y = 1000, time_limit = 60*3, num_of_lives = 3;
+
+
+  int packet_type = 1; // 0 ... 7 only
+  total_escape += escape_assign(game_ID, &data[0 + total_escape]); // game_ID
+  total_escape += escape_assign(player_id, &data[1 + total_escape]); // player_ID
+  total_escape += assign_int_to_bytes_lendian_escape(&data[2 + total_escape], p_initial_size, 1);
+  total_escape += assign_int_to_bytes_lendian_escape(&data[6 + total_escape], max_x, 1);
+  total_escape += assign_int_to_bytes_lendian_escape(&data[10 + total_escape], max_y, 1);
+  total_escape += assign_int_to_bytes_lendian_escape(&data[14 + total_escape], time_limit, 1);
+  total_escape += assign_int_to_bytes_lendian_escape(&data[18 + total_escape], num_of_lives, 1);
+
+  int packet_size = create_packet(packet, packet_type, data, 22+total_escape);
+
+  if (send_prepared_packet(packet, packet_type, packet_size, client->socket) < 0) {
+      printf("[ERROR] Cannot send some packet in here...\n");
+      return -1;
+  }
+
+  return 0;
+}
+
+// processing finished
+int process_packet_0(unsigned char* packet_data_only, int data_size, client_struct* client) {
+  // ================ [PACKET CONTENT] =======================
+  // packet[0] = len of username
+  // packet[1 ... len_of_username] = username
+  // packet[len_of_username+1 ... len_of_username+1+6] = color
+  // =========================================================
+  // Note. data_size should be equal to len_of_username+1+6
+
+  char username_len = (char) packet_data_only[0];
+  char username[256] = {0};
+  char color[7] = {0};
+  memcpy(username, &packet_data_only[1], username_len);
+  memcpy(color, &packet_data_only[1 + username_len], 6);
+
+  client->has_introduced = 1;
+  strcpy(client->username, username);
+  strcpy(client->color, color);
+
+  // maybe should check if username already exists
+
+  if (username_len != strlen(username) || strlen(color) != 6) {
+    printf("[ERROR] processing packet 0. username or color length incorrect. \n");
+    return -1;
+  }
+
+  printf("[OK] Process packet function assigned: username = %s, color = %s\n", username, color);
+
+  printf("[OK] Client username = %s, client color = %s (read from client struct)\n", client->username, client->color);
+
+  if (send_packet_1(client) < 0) {
+    printf("[ERROR] Packet 1 could not be sent.\n");
+    return -1;
+  }
+
+  return 0;
+}
+
+int process_packet_2(unsigned char* packet_data_only, int size_data, client_struct* client) {
   //TODO
   return 0;
 }
 
-int process_packet_2(unsigned char* packet, int size) {
+int process_packet_4(unsigned char* packet_data_only, int size_data, client_struct* client) {
   //TODO
   return 0;
 }
 
-int process_packet_4(unsigned char* packet, int size) {
+int process_packet_7(unsigned char* packet_data_only, int size_data, client_struct* client) {
   //TODO
   return 0;
 }
 
-int process_packet_7(unsigned char* packet, int size) {
-  //TODO
-  return 0;
-}
-
-void process_incoming_packet(unsigned char *packet, int size) {
-  printf("Welcome to packet processor!\n");
+void process_incoming_packet(unsigned char *packet, int size, client_struct* client, int packet_header_size_excl_div) {
+  printf("[OK] Welcome to packet processor!\n");
+  int chksum_Size = 1;
   // printf("Packet that is received here is:\n");
   // print_bytes(packet, size);
 
-  // todo
   // 1. validate checksum
   // 2. get type
   // 3. get it to according function
@@ -106,18 +177,19 @@ void process_incoming_packet(unsigned char *packet, int size) {
 
   // 3.
   int process_result = -1;
+  int data_size = size - packet_header_size_excl_div - chksum_Size;
   switch (type) { // only 0, 2, 4, 7 can be received by server
     case 0:
-      process_result = process_packet_0(packet, size);
+      process_result = process_packet_0(&packet[packet_header_size_excl_div-1], data_size, client);
       break;
     case 2:
-      process_result = process_packet_2(packet, size);
+      process_result = process_packet_2(&packet[packet_header_size_excl_div-1], data_size, client);
       break;
     case 4:
-      process_result = process_packet_4(packet, size);
+      process_result = process_packet_4(&packet[packet_header_size_excl_div-1], data_size, client);
       break;
     case 7:
-      process_result = process_packet_7(packet, size);
+      process_result = process_packet_7(&packet[packet_header_size_excl_div-1], data_size, client);
       break;
     default:
       printf("Invalid packet type. Abandoned.\n");
@@ -160,7 +232,7 @@ void* process_client(void* arg){
 
     if (packet_cursor == packet_header_size_excl_div + current_packet_data_size) {
       printf("[OK] Reached end of packet reading... Current cursor pos. %d\n", packet_cursor);
-      process_incoming_packet(packet_in, packet_header_size_excl_div + current_packet_data_size - 1); // TODO make seperate thread or smth so it can continue reading packets...
+      process_incoming_packet(packet_in, packet_header_size_excl_div + current_packet_data_size - 1, client, packet_header_size_excl_div); // TODO make seperate thread or smth so it can continue reading packets...
       packet_status = 0;
       current_packet_data_size = 0;
       packet_cursor = 0;
@@ -427,3 +499,4 @@ void broadcast_packet(char *packet, int id) {
 
 	pthread_mutex_unlock(&lock1);
 }
+
