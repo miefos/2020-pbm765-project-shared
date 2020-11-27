@@ -17,6 +17,7 @@
 typedef struct {
   int socket;
   int ID;
+  int has_introduced; // meaning the 0th packet is received (at first 0, when receives set it to 1)
   char username[256];
   char color[7];
 } client_struct;
@@ -25,7 +26,7 @@ typedef struct {
 int client_count = 0;
 int ID = 0;
 client_struct* clients[MAX_CLIENTS]; // creates array of clients with size MAX_CLIENTS
-int leave_flag = 0;
+volatile int leave_flag = 0;
 
 int gameloop();
 void* start_network(void* arg);
@@ -51,7 +52,8 @@ int main(int argc, char **argv){
 	signal(SIGINT, set_leave_flag);
 
   // server setup
-  int port; if (server_setup(argc, argv, &port) < 0) return -1;
+  int port;
+  if (server_setup(argc, argv, &port) < 0) return -1;
 
   // networking_thread
   pthread_t networking_thread;
@@ -67,51 +69,46 @@ int main(int argc, char **argv){
 
 /* This function should be used when creating new threads for new clients... */
 void* process_client(void* arg){
-	char buffer[BUFFER_SIZE];
-	char username[270];
+	// char buffer[BUFFER_SIZE];
+	// char username[270];
+  char received_byte[1];
   int client_leave_flag = 0;
 
 	client_struct* client = (client_struct *) arg;
 
-	if(recv(client->socket, username, 270, 0) <= 0){
-		printf("[ERROR] Cannot get intro packet [packet 0].\n");
-		client_leave_flag = 1;
-	} else {
-		strcpy(client->username, username);
-		sprintf(buffer, "%s joined\n", client->username);
-    fflush(stdout);
-		printf("%s", buffer);
-		broadcast_packet(buffer, client->ID);
-	}
-
-	bzero(buffer, BUFFER_SIZE);
-
+  int receive;
 	while(1){
     if (client_leave_flag) break;
 
-    int receive = recv(client->socket, buffer, BUFFER_SIZE, 0) > 0;
-		if (receive > 0){ // received packet
-			if(strlen(buffer) > 0){
-        if (strcmp(buffer, "quit") == 0) { // quit
-          sprintf(buffer, "%s left\n", client->username);
-          printf("%s", buffer);
-          broadcast_packet(buffer, client->ID);
-          client_leave_flag = 1;
-        } else { // normal packet
-				  broadcast_packet(buffer, client->ID);
-				  printf("%s [from %s]\n", buffer, client->username);
-        }
-			}
+
+    receive = recv(client->socket, received_byte, 1, 0);
+		if (receive > 0){ // received byte
+      printf("Received %c (%d) from socket %d\n", printable_char(received_byte[0]), received_byte[0], client->socket);
+      fflush(stdout); // to "refresh" the stdout (because no \n char and so it is not printed but kept in buffer)
+
+
+
+			// if(strlen(buffer) > 0){
+        // if (strcmp(buffer, "quit") == 0) { // quit
+        //   sprintf(buffer, "%s left\n", client->username);
+        //   printf("%s", buffer);
+        //   broadcast_packet(buffer, client->ID);
+        //   client_leave_flag = 1;
+        // } else { // normal packet
+				//   broadcast_packet(buffer, client->ID);
+				//   printf("%s [from %s]\n", buffer, client->username);
+        // }
+			// }
 		} else if (receive < 0){ // disconnection or error
       printf("[WARNING] From %s could not receive package.", client->username);
 		} else { // receive == 0
-      sprintf(buffer, "%s left\n", client->username);
-      printf("%s", buffer);
-      broadcast_packet(buffer, client->ID);
+      // sprintf(buffer, "%s left\n", client->username);
+      // printf("%s", buffer);
+      // broadcast_packet(buffer, client->ID);
+      printf("Recv failed. Client leave flag set.\n");
       client_leave_flag = 1;
     }
 
-		bzero(buffer, BUFFER_SIZE);
 	}
 
 	/* stop client, thread, connection etc*/
@@ -186,7 +183,7 @@ void* start_network(void* arg) {
   	/* Client settings */
   	client_struct* client = (client_struct *) malloc(sizeof(client_struct));
     if (client == NULL) {
-      printf("[ERROR] Malloc did not work. Denying client.\n");
+      printf("[WARNING] Malloc did not work. Denying client.\n");
       close(client_socket);
       continue;
     }

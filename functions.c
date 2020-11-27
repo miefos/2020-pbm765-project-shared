@@ -2,12 +2,112 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <ctype.h> // toupper
+#include <errno.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <ctype.h> // toupper, isprint
+#include <inttypes.h>
 
 #ifndef MC_MAX_SIZE_STRING
 #define MC_MAX_SIZE_STRING 256
 #endif
 
+
+char printable_char(char c) {
+  if (isprint(c)) return c;
+  return ' ';
+}
+
+void print_bytes(void* packet, int count) {
+  int i = 0;
+  char *p = (char *) packet;
+  if (count > 999) {
+    printf("Cannot print more than 999 bytes! You asked for %d\n", count);
+    return;
+  }
+
+  printf("Printing %d bytes...\n", count);
+  printf("[NPK] [C] [HEX] [DEC] [ BINARY ]\n");
+  printf("================================\n");
+  for (i = 0; i < count; i++) {
+    printf(" %3d | %c | %02x | %3d | %c%c%c%c%c%c%c%c\n", i, printable_char(p[i]), p[i], p[i],
+      p[i] & 0x80 ? '1' : '0',
+      p[i] & 0x40 ? '1' : '0',
+      p[i] & 0x20 ? '1' : '0',
+      p[i] & 0x10 ? '1' : '0',
+      p[i] & 0x08 ? '1' : '0',
+      p[i] & 0x04 ? '1' : '0',
+      p[i] & 0x02 ? '1' : '0',
+      p[i] & 0x01 ? '1' : '0'
+    );
+  }
+
+}
+
+
+void assign_int_to_bytes_lendian(unsigned char* packet_part, int n) {
+  packet_part[0] = n & 0xFF;
+  packet_part[1] = (n >> 8) & 0xFF;
+  packet_part[2] = (n >> 16) & 0xFF;
+  packet_part[3] = (n >> 24) & 0xFF;
+}
+
+unsigned char get_checksum(unsigned char* packet, int length) {
+  unsigned char checksum = 0;
+
+  for (int i = 0; i < length; i++) {
+    checksum ^= packet[i];
+  }
+
+  return checksum;
+}
+
+int create_packet(unsigned char* packet, int type, char* data) {
+  unsigned int DATA_LENGTH = strlen(data);
+
+  if (type > 7 || type < 0) {
+    printf("[WARNING] Packet type wrong. It is %d but should be [0 ... 7]. Packet not sent.\n", type);
+    return 0;
+  }
+
+  packet[0] = 0; // divider
+  packet[1] = 0; // divider
+  packet[2] = type & 0xFF; // packet type (1 byte) -- from 0 to 7 -- cuts off to 1 byte
+  // packet[3,4,5,6] = DATA_LENGTH
+  assign_int_to_bytes_lendian(&packet[3], DATA_LENGTH);
+  // packet[7,8,9,10] = NPK (int representing which is sequence the received packet is)
+  assign_int_to_bytes_lendian(&packet[7], 0);
+  // THEN COMES DATA ... packet[11 ... (DATA_LENGTH+11)]
+  memcpy(&packet[11], data, DATA_LENGTH);
+  // CHECHKSUM! (1 byte)
+  // checksum everything except dividers (first 00)
+  packet[DATA_LENGTH + 11] = get_checksum(packet+2, DATA_LENGTH + 11 - 2);
+
+  // print_bytes(packet, 50);
+
+
+  int total_packet_size =
+    2 + // divider 00
+    1 + // packet type (0 - 7)
+    4 + // data length
+    4 + // npk
+    DATA_LENGTH + // data
+    1; // checksum
+
+  return total_packet_size;
+}
+
+
+
+// void set_leave_flag(int *flag) {
+//     (*flag) = 1;
+// }
+
+int is_little_endian_system() {
+  volatile uint32_t i = 0x01234567;
+  return (*((uint8_t*)(&i))) == 0x67;
+  /* 1 = little, 0 = big*/
+}
 
 void remove_newline(char *str) {
       if (strlen(str) > 0 && str[strlen(str)-1] == '\n')
@@ -15,12 +115,27 @@ void remove_newline(char *str) {
 }
 
 int get_username_color(char* username, char* color) {
+  // ======================================
+  // delete/comment next line-s on deployment
+  printf("[DEV] Press enter to autofill.\n");
+
+
+
   char username_temp[260]; // actually max 255
   char color_temp[10]; // actually max 6
   // insert username
   int username_ok = 1;
   printf("Please enter your username: ");
   fgets(username_temp, 260, stdin);
+  // ======================================
+  // delete/comment next line-s on deployment
+  if (strcmp(username_temp, "\n\0") == 0) {
+    printf("[DEV] Autofill requested. The following will be assigned.\n");
+    printf("[DEV] Name: UsernameTest1, color: ABC12D. Username length 13.\n");
+    strcpy(username, "UsernameTest1");
+    strcpy(color, "ABC12D");
+    return 0;
+  }
   remove_newline(username_temp);
   if (strlen(username_temp) > 255 || strlen(username_temp) < 2) {
       printf("Username should be between 2 and 255 chars. \n");
@@ -91,6 +206,7 @@ int contains_only_hex_digits(char* str) {
 }
 
 int client_setup(int argc, char **argv, int *port, char *ip) {
+  //// GET ARGS
   // validate parameters
   if (argc != 3) {
     printf("[Error] Please provide IP and port argument only (ex: -a=123.123.123.123 -p=9001).\n");
@@ -115,7 +231,28 @@ int client_setup(int argc, char **argv, int *port, char *ip) {
 
   printf("[OK] Client params successful. Port: %d, ip: %s\n", *port, ip);
 
-  return 0;
+
+  //// SETUP NETWORK
+  int client_socket = socket(AF_INET, SOCK_STREAM, 0);
+
+  // specify an address for the socket
+  struct sockaddr_in server_address;
+  server_address.sin_family = AF_INET;
+  server_address.sin_port = htons(*port);
+  server_address.sin_addr.s_addr = inet_addr(ip);
+
+  int connection_status = connect(client_socket, (struct sockaddr *) &server_address, sizeof(server_address));
+  // check for error with the connection
+  if (connection_status < 0) {
+    printf("[ERROR] There was an error with the connection.\n");
+    printf("============================================================\n");
+    printf("client socket = %d, server_address = %p, sizeof struct = %ld\n", client_socket, (struct sockaddr *) &server_address, sizeof(server_address));
+    printf("connection_status = %d, errno = %d\n", connection_status, errno);
+    printf("Port = %d, ip = %s\n", *port, ip);
+    return -1;
+  }
+
+  return client_socket;
 }
 
 
