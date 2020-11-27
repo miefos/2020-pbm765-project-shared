@@ -13,7 +13,24 @@
 #define MC_MAX_SIZE_STRING 256
 #endif
 
-#define MAX_CLIENTS 10
+
+int escape_assign(int num, unsigned char* packet) {
+  if (num == 0) {
+    packet[0] = 1;
+    packet[1] = 2;
+    return 1;
+
+  } else if (num == 1) {
+    packet[0] = 1;
+    packet[1] = 3;
+    return 1;
+
+  } else {
+    packet[0] = num & 0xFF; // cuts to one byte
+  }
+
+  return 0;
+}
 
 char printable_char(char c) {
   if (isprint(c)) return c;
@@ -46,19 +63,46 @@ void print_bytes(void* packet, int count) {
 
 }
 
+int assign_int_to_bytes_lendian_escape(unsigned char* packet_part, int n, int should_escape) {
+  int escape_count = 0;
+  if (should_escape) {
+    unsigned char byte;
 
-void assign_int_to_bytes_lendian(unsigned char* packet_part, int n) {
-  packet_part[0] = n & 0xFF;
-  packet_part[1] = (n >> 8) & 0xFF;
-  packet_part[2] = (n >> 16) & 0xFF;
-  packet_part[3] = (n >> 24) & 0xFF;
+    // byte 1
+    byte = n & 0xFF;
+    escape_count += escape_assign((int) byte, &packet_part[0]);
+
+    // byte 2
+    byte = (n >> 8) & 0xFF;
+    escape_count += escape_assign((int) byte, &packet_part[1 + escape_count]);
+
+
+    // byte 3
+    byte = (n >> 16) & 0xFF;
+    escape_count += escape_assign((int) byte, &packet_part[2 + escape_count]);
+
+
+    // byte 4
+    byte = (n >> 16) & 0xFF;
+    escape_count += escape_assign((int) byte, &packet_part[3 + escape_count]);
+  } else {
+    packet_part[0] = n & 0xFF;
+    packet_part[1] = (n >> 8) & 0xFF;
+    packet_part[2] = (n >> 16) & 0xFF;
+    packet_part[3] = (n >> 24) & 0xFF;
+  }
+
+  return escape_count;
 }
-
-unsigned char get_checksum(unsigned char* packet, int length) {
+unsigned char get_checksum(unsigned char* packet_header, int length_header_excl_div, unsigned char* packet_data, int data_length) {
   unsigned char checksum = 0;
 
-  for (int i = 0; i < length; i++) {
-    checksum ^= packet[i];
+  for (int i = 0; i < length_header_excl_div; i++) {
+    checksum ^= packet_header[i];
+  }
+
+  for (int i = 0; i < data_length; i++) {
+    checksum ^= packet_data[i];
   }
 
   return checksum;
@@ -66,6 +110,7 @@ unsigned char get_checksum(unsigned char* packet, int length) {
 
 int create_packet(unsigned char* packet, int type, char* data) {
   unsigned int DATA_LENGTH = strlen(data);
+  int escaped_total = 0;
 
   if (type > 7 || type < 0) {
     printf("[WARNING] Packet type wrong. It is %d but should be [0 ... 7]. Packet not sent.\n", type);
@@ -74,16 +119,31 @@ int create_packet(unsigned char* packet, int type, char* data) {
 
   packet[0] = 0; // divider
   packet[1] = 0; // divider
-  packet[2] = type & 0xFF; // packet type (1 byte) -- from 0 to 7 -- cuts off to 1 byte
+  escaped_total += escape_assign(type, &packet[2]);
   // packet[3,4,5,6] = DATA_LENGTH
-  assign_int_to_bytes_lendian(&packet[3], DATA_LENGTH);
+  escaped_total += assign_int_to_bytes_lendian_escape(&packet[3 + escaped_total], DATA_LENGTH, 1);
+
   // packet[7,8,9,10] = NPK (int representing which is sequence the received packet is)
-  assign_int_to_bytes_lendian(&packet[7], 0);
+  escaped_total += assign_int_to_bytes_lendian_escape(&packet[7 + escaped_total], 0, 1);
+
   // THEN COMES DATA ... packet[11 ... (DATA_LENGTH+11)]
-  memcpy(&packet[11], data, DATA_LENGTH);
+  int data_starts_at = 11 + escaped_total;
+  memcpy(&packet[data_starts_at], data, DATA_LENGTH);
   // CHECHKSUM! (1 byte)
   // checksum everything except dividers (first 00)
-  packet[DATA_LENGTH + 11] = get_checksum(packet+2, DATA_LENGTH + 11 - 2);
+  // packet header contains type, data_length, and npk... unfortunately hard to do it..
+  // could escape the whole packet after setting everything but that would need large resources...
+  int packet_header_size_excl_div = 9;
+  unsigned char packet_header[packet_header_size_excl_div]; // total 9 bytes should be
+  // content should be
+  // packet_header[0] = type
+  // packet_header[1,2,3,4] = data_length
+  // packet_header[5,6,7,8] = npk
+  packet_header[0] = type & 0xFF;
+  assign_int_to_bytes_lendian_escape(&packet_header[1], DATA_LENGTH, 0);
+  assign_int_to_bytes_lendian_escape(&packet_header[5], 0, 0);
+
+  packet[DATA_LENGTH + 11 + escaped_total] = get_checksum(packet_header, packet_header_size_excl_div, packet+data_starts_at, DATA_LENGTH);
 
   // print_bytes(packet, 50);
 
@@ -94,7 +154,8 @@ int create_packet(unsigned char* packet, int type, char* data) {
     4 + // data length
     4 + // npk
     DATA_LENGTH + // data
-    1; // checksum
+    1 + // checksum
+    escaped_total; // total escapes
 
   return total_packet_size;
 }
@@ -139,8 +200,8 @@ int get_username_color(char* username, char* color) {
     return 0;
   }
   remove_newline(username_temp);
-  if (strlen(username_temp) > 255 || strlen(username_temp) < 2) {
-      printf("Username should be between 2 and 255 chars. \n");
+  if (strlen(username_temp) > 255 || strlen(username_temp) < 1) {
+      printf("Username should be between 1 and 255 chars. \n");
       username_ok = 0;
   }
 
@@ -148,8 +209,8 @@ int get_username_color(char* username, char* color) {
     printf("\nPlease try again: ");
     fgets(username_temp, 260, stdin);
     remove_newline(username_temp);
-    if (strlen(username_temp) > 255 || strlen(username_temp) < 2) {
-      printf("Username should be between 2 and 255 chars. \n");
+    if (strlen(username_temp) > 255 || strlen(username_temp) < 1) {
+      printf("Username should be between 1 and 255 chars. \n");
       username_ok = 0;
     } else {
       username_ok = 1;
@@ -388,3 +449,32 @@ int get_port(char* key, int argc, char** argv) {
   return port;
 
 }
+
+
+
+// int memcpy_and_escape(void* destination, void* source, int size) {
+//   /* non-machine-compatible (results can differ due to endianness)*/
+//   printf("===========memcpy===========\n");
+//   int i = 0, num_replaced = 0;
+//   char* d = destination;
+//   char* s = source;
+//   for (i = 0; i < size; i++) {
+//     if (s[i] == 0) {
+//       d[i + num_replaced] = 1;
+//       d[i + 1 + num_replaced] = 2;
+//       num_replaced++;
+//       printf("found 0: %c (%d)\n", s[i], s[i]);
+//     } else if (s[i] == 1){
+//       d[i + num_replaced] = 1;
+//       d[i + 1 + num_replaced] = 3;
+//       num_replaced++;
+//       printf("found 1: %c (%d)\n", s[i], s[i]);
+//       printf("d = %s, s = %s\n", d, s);
+//     } else {
+//       d[i + num_replaced] = s[i];
+//     }
+//   }
+//   printf("===========memcpy===========\n");
+//
+//   return num_replaced;
+// }

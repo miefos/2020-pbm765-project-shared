@@ -11,9 +11,6 @@
 #include <sys/wait.h>
 #include "functions.h"
 
-#define MAX_CLIENTS 10
-#define BUFFER_SIZE 2048
-
 typedef struct {
   int socket;
   int ID;
@@ -69,23 +66,20 @@ int main(int argc, char **argv){
 
 /* This function should be used when creating new threads for new clients... */
 void* process_client(void* arg){
-	// char buffer[BUFFER_SIZE];
-	// char username[270];
-  char received_byte[1];
-  int client_leave_flag = 0;
+	char packet_in[MAX_PACKET_SIZE], rec_byte[1];
+  int client_leave_flag = 0, receive;
 
 	client_struct* client = (client_struct *) arg;
 
-  int receive;
 	while(1){
     if (client_leave_flag) break;
 
 
-    receive = recv(client->socket, received_byte, 1, 0);
+    receive = recv(client->socket, rec_byte, 1, 0);
 		if (receive > 0){ // received byte
-      printf("Received %c (%d) from socket %d\n", printable_char(received_byte[0]), received_byte[0], client->socket);
+      printf("Received %c (%d) from socket %d\n", printable_char(rec_byte[0]), rec_byte[0], client->socket);
       fflush(stdout); // to "refresh" the stdout (because no \n char and so it is not printed but kept in buffer)
-
+      // if ()
 
 
 			// if(strlen(buffer) > 0){
@@ -139,6 +133,13 @@ void* start_network(void* arg) {
   // infinite loop...
   pthread_t new_client_threads;
   while (1) {
+    /* Check if max clients is reached */
+  	if(client_count + 1 == MAX_CLIENTS){
+  		printf("[WARNING] Max clients reached. Connection will be rejected.\n");
+  		sleep(1);
+      continue;
+  	}
+
     /* waiting for clients */
     client_socket = accept(main_socket, (struct sockaddr*) &client_address, &client_address_size);
     if (client_socket < 0) {
@@ -146,13 +147,6 @@ void* start_network(void* arg) {
         printf("[WARNING] Error accepting client.\n");
         continue;
     }
-
-  	/* Check if max clients is reached */
-  	if(client_count + 1 == MAX_CLIENTS){
-  		printf("[WARNING] Max clients reached. Connection rejected.\n");
-  		close(client_socket);
-  		continue;
-  	}
 
   	/* Add client and make new thread */
     client_struct* client = add_client(client_socket);

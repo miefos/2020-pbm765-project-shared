@@ -10,18 +10,14 @@
 #include <sys/mman.h>
 #include "functions.h"
 
-#define BUFFER_SIZE 1024
-#define MAX_PACKET_SIZE 100000
-
 int leave_flag = 0;
 
 void set_leave_flag() {
     leave_flag = 1;
 }
 
-void prepare_data_for_packet_0 (
-  char* data, char* username, char* color, int name_len) {
-  // Packet contents:
+void set_data_packet_0 (char* data, char* username, char* color, int name_len) {
+  // Data packet contents:
   // ============================
   // [byte 0] = chars in username
   // [byte 1 ... strlen(username) + 1] = username
@@ -29,16 +25,20 @@ void prepare_data_for_packet_0 (
   // ============================
   // note for color bytes: there are 6 chars in color - 6 hex digits.
 
-  data[0] = name_len & 0xFF;
-  memcpy(data+1, username, name_len);
-  memcpy(data+1+name_len, color, 6);
+  if (name_len == 0) {
+    printf("[ERROR] This should not happen so no further analysis.\n");
+  }
+
+  data[0] = name_len & 0xFF; // cuts to 1 byte
+  memcpy(data + 1, username, name_len); // no need to escape since its string
+  memcpy(data + 1 + name_len, color, 6); // no need to escape since its string
   // null terminator, will NOT be in packet but helpful in creating packet...
-  data[1+name_len+6] = '\0';
+  data[1 + name_len + 6] = '\0';
 }
 
 void* send_loop(void* arg) {
 	int* client_socket = (int *) arg;
-  char message[2] = {'\0'};
+  char message[1];
 
   while(1) {
     message[0] = fgetc(stdin);
@@ -48,7 +48,7 @@ void* send_loop(void* arg) {
     // 	return NULL;
     // } else {
       if (message[0] != '\n') // do not send newline
-        send(*client_socket, message, strlen(message), 0);
+        send(*client_socket, message, 1, 0);
     // }
 
   }
@@ -73,6 +73,10 @@ void* receive_loop(void* arg) {
   return NULL;
 }
 
+
+
+
+
 int main(int argc, char **argv){
   unsigned char packet[MAX_PACKET_SIZE];
   char data[MAX_PACKET_SIZE];
@@ -89,7 +93,7 @@ int main(int argc, char **argv){
   get_username_color(username, color);
 
 	// Send 0th packet
-  prepare_data_for_packet_0(data, username, color, strlen(username));
+  set_data_packet_0(data, username, color, strlen(username));
   int packet_size = create_packet(packet, 0, data);
 
   for (int i = 0; i < packet_size; i++) {
@@ -111,6 +115,8 @@ int main(int argc, char **argv){
     return -1;
 	}
 
+	// char username[270];
+  // char ;
 	pthread_t receive_thread;
   if(pthread_create(&receive_thread, NULL, (void *) receive_loop, &client_socket) != 0){
 		printf("ERROR: thread creating err. \n");
