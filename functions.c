@@ -94,18 +94,29 @@ int assign_int_to_bytes_lendian_escape(unsigned char* packet_part, int n, int sh
 
   return escape_count;
 }
+
+int get_int_from_4bytes_lendian(unsigned char* the4bytes) {
+  // It works only for little endian...
+  return *((int *) the4bytes);
+}
+
+
 unsigned char get_checksum(unsigned char* packet_header, int length_header_excl_div, unsigned char* packet_data, int data_length) {
-  unsigned char checksum = 0;
+  unsigned char chk = 0;
 
   for (int i = 0; i < length_header_excl_div; i++) {
-    checksum ^= packet_header[i];
+    chk ^= packet_header[i];
   }
+
+  printf(" Checksum after head %d\n", chk);
 
   for (int i = 0; i < data_length; i++) {
-    checksum ^= packet_data[i];
+    chk ^= packet_data[i];
   }
 
-  return checksum;
+  printf(" Checksum after he2ad %d\n", chk);
+
+  return chk;
 }
 
 int create_packet(unsigned char* packet, int type, char* data) {

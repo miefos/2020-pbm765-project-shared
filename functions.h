@@ -5,12 +5,14 @@
 
 #define MAX_CLIENTS 10
 #define BUFFER_SIZE 1024
-#define MAX_PACKET_SIZE 100000
+#define MAX_PACKET_SIZE 10000
 
 int get_named_argument(char* key, int argc, char **argv, char** result);
 int get_port(char* key, int argc, char** argv);
 int contains_only_hex_digits(char* str);
 
+
+int get_int_from_4bytes_lendian(unsigned char* the4bytes);
 int server_network_setup(int* main_socket, struct sockaddr_in* server_address, int port);
 int server_parse_args(int argc, char **argv, int *port);
 int client_setup(int argc, char **argv, int *port, char *ip);
