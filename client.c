@@ -9,31 +9,24 @@
 #include <string.h>
 #include <sys/mman.h>
 #include "functions.h"
+#include "util_functions.h"
+#include "setup.h"
 
 int leave_flag = 0;
+// client status information...
+// 0 - initial
+// 1 - received approval from server (1st packet)
+// 2 - after 1st packet waiting for user input in send_loop to set ready status
+// 3 - got input, ready status set to 3 by send_loop
+// 4 - ready status sent to server (2rd packet sent)
+// 5 - game lost(died) (received packet 5)
+// 6 - Game ended (received packet 6)
+// 7 - CURRENTLY NOWHERE CAN PUT TO 7
+int client_status = 0;
+unsigned char g_id = 0, p_id = 0;
 
 void set_leave_flag() {
     leave_flag = 1;
-}
-
-int set_data_packet_0 (unsigned char* data, char* username, char* color, int name_len) {
-  // Data packet contents:
-  // ============================
-  // packet[0] = chars in username
-  // packet[1 ... strlen(username) + 1] = username
-  // packet[strlen(username) + 1 ... strlen(username) + 1 + 6] = color
-  // ============================
-  // note for color bytes: there are 6 chars in color - 6 hex digits.
-
-  if (name_len == 0) {
-    printf("[ERROR] This should not happen so no further analysis.\n");
-  }
-
-  data[0] = name_len & 0xFF; // cuts to 1 byte
-  memcpy(data + 1, username, name_len); // no need to escape since its string
-  memcpy(data + 1 + name_len, color, 6); // no need to escape since its string
-
-  return 1 + name_len + 6;
 }
 
 void* send_loop(void* arg) {
@@ -41,81 +34,103 @@ void* send_loop(void* arg) {
   char message[1];
 
   while(1) {
-    message[0] = fgetc(stdin);
+    if ((message[0] =  fgetc(stdin)) != '\n') { // do not send newline
+      if (client_status == 2) client_status = 3; // set client_status to 3
+      else if (client_status == 0) send(*client_socket, message, 1, 0); // just send
+      else if (client_status == 1) send(*client_socket, message, 1, 0); // just send
+      else if (client_status == 4) { // getchar for packet 4 updates
+        unsigned char p[MAX_PACKET_SIZE];
 
-    // if (strcmp(message, "quit") == 0) {
-    // 	set_leave_flag();
-    // 	return NULL;
-    // } else {
-      if (message[0] != '\n') // do not send newline
-        send(*client_socket, message, 1, 0);
-    // }
+        int p_size1 =  _create_packet_7(p, g_id, p_id, "I decided to send you an update about my keypresses.");
+        if (send_prepared_packet(p, p_size1, *client_socket) < 0) {
+          printf("[ERROR] Packet 7 could not be sent.\n");
+        } else {
+          printf("[OK] Packet 7 sent successfully.\n");
+        }
 
+        char w = 0, a = 0, s = 0, d = 0;
+        // somehow should determine which keys pressed ... currently hard-coded.
+        // perhaps also some logic should be changed so that this not come only after fgetc
+        w = 1; a = 0; s = 1; d = 1; // 1 - pressed, 0 - not pressed
+        int p_size = _create_packet_4(p, &g_id, &p_id, w, a, s, d);
+        if (send_prepared_packet(p, p_size, *client_socket) < 0) {
+          printf("[ERROR] Packet 4 could not be sent.\n");
+        } else {
+          printf("[OK] Packet 4 sent successfully.\n");
+        }
+      }
+    }
   }
 
   return NULL;
 }
 
 void* receive_loop(void* arg) {
+
+  unsigned char packet_in[MAX_PACKET_SIZE];
+  int result;
+  // 0 = no packet, 1 = packet started, 2 = packet started, have size
+  int packet_status = 0;
+  int packet_cursor = 0; // keeps track which packet_in index is set last
+  int packet_data_size = 0;
+
   int* client_socket = (int *) arg;
-	char message[2] = {'\0'};
-  while (1) {
-    if (recv(*client_socket, message, 1, 0) > 0) {
-      // if (strcmp(message, "quitfs") == 0) { // quit from server
-      //   printf("Received quitfs\n");
-      //   set_leave_flag();
-      //   return NULL;
-      // }
-      printf("%s", message);
-    } else break; // disconnection or error
-  }
+
+	while(1){
+    if (leave_flag) break;
+    result = recv_byte(packet_in, &packet_cursor, &packet_data_size, &packet_status, 0, NULL, *client_socket, &client_status, &g_id, &p_id);
+    if (client_status == 5 || client_status == 6) { set_leave_flag(); continue; } // died :(
+
+    if (result > 0) {
+        // everything done in recv_byte already...
+		} else if (result < 0){ // disconnection or error
+      printf("[WARNING] Could not receive package.\n");
+      set_leave_flag();
+		} else { // receive == 0
+      printf("Recv failed. Leave flag set.\n");
+      set_leave_flag();
+    }
+
+	}
 
   return NULL;
 }
 
-
-
-
-
 int main(int argc, char **argv){
-  unsigned char packet[MAX_PACKET_SIZE];
-  unsigned char data[MAX_PACKET_SIZE];
+  unsigned char p[MAX_PACKET_SIZE];
+  // unsigned char data[MAX_PACKET_SIZE];
 
   // catch SIGINT (Interruption, e.g., ctrl+c)
 	signal(SIGINT, set_leave_flag);
 
   // client setup
-  int port, client_socket; char ip[100];
-  if ((client_socket = client_setup(argc, argv, &port, ip)) < 0) return -1;
+  int port, c_socket; char ip[100];
+  if ((c_socket = client_setup(argc, argv, &port, ip)) < 0) return -1;
+
 
   // get username, color
   char username[256], color[7];
   get_username_color(username, color);
 
 	// Send 0th packet
-  unsigned char packet_type = 0; // 0 ... 7 only
-  unsigned int data_len = set_data_packet_0(data, username, color, strlen(username));
-  int packet_size = create_packet(packet, packet_type, data, data_len);
+  int packet_size = _create_packet_0(p, username, color);
+  send_prepared_packet(p, packet_size, c_socket);
 
-  if (send_prepared_packet(packet, packet_type, packet_size, client_socket) < 0) {
-      printf("[ERROR] Cannot send intro packet in here...\n");
-      return -1;
-  }
-
+  // start send thread
 	pthread_t send_thread;
-  if(pthread_create(&send_thread, NULL, (void *) send_loop, &client_socket) != 0){
+  if(pthread_create(&send_thread, NULL, (void *) send_loop, &c_socket) != 0){
 		printf("[ERROR] thread creating err. \n");
     return -1;
 	}
 
-	// char username[270];
-  // char ;
+  // start receive thread
 	pthread_t receive_thread;
-  if(pthread_create(&receive_thread, NULL, (void *) receive_loop, &client_socket) != 0){
+  if(pthread_create(&receive_thread, NULL, (void *) receive_loop, &c_socket) != 0){
 		printf("ERROR: thread creating err. \n");
 		return -1;
 	}
 
+  // each sec check if should finish program
 	while (1){
     if(leave_flag){
       printf("The game has ended.\n");
@@ -124,7 +139,8 @@ int main(int argc, char **argv){
     sleep(1);
 	}
 
-	close(client_socket);
+  // close conn
+	close(c_socket);
 
 	return 0;
 }
@@ -188,4 +204,3 @@ for shared memory could not use char str[200] = ""; needed to use strcpy... Beca
 problem related unsigned char
 
     **/
-

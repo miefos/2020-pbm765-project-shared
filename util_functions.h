@@ -1,0 +1,12 @@
+int is_little_endian_system();
+void remove_newline(char *str);
+int contains_only_hex_digits(char* str);
+int assign_int_to_bytes_lendian_escape(unsigned char* packet_part, int n, int should_escape);
+int get_int_from_4bytes_lendian(unsigned char* the4bytes);
+short int get_sh_int_2bytes_lendian(unsigned char* the2bytes);
+void print_one_byte (unsigned char byte);
+int escape_assign(unsigned char num, unsigned char* packet);
+char printable_char(char c);
+void print_bytes(void* packet, int count);
+unsigned char get_checksum(unsigned char* arr, int size);
+char get_bit(unsigned char byte, char bitNumber);
